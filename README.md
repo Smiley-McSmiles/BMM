@@ -4,7 +4,7 @@
 
 # Description
 
-BASH Mod Manager is a CLI
+BASH Mod Manager is a CLI Mod Manager for Bethesda Games (for now?)
 
 # Getting Started
 
