@@ -1,5 +1,5 @@
 #!/bin/bash
-version=1.0.1
+version=1.0.0
 
 if [ ! -x "$(command -v unzip)" ] && [ ! -x "$(command -v 7z)" ] && [ ! -x "$(command -v unrar)" ]; then
 	echo ">ERROR: Bash Mod Manager requires the following packages:"
@@ -73,9 +73,9 @@ InstallArchive()
 
 		archiveExtension=$(echo "$itemSelected" | rev | cut -d "." -f 1 | rev)
 		archiveNoExtension=$(echo "$itemSelected" | sed "s|.$archiveExtension||g")
-		if [ ! -d "$unpackedDir/$archiveNoExtension" ]; then
+		if [ ! -d "$unpackedDir/$archiveNoExtension" ] && [[ ! $archiveExtension == [Ee][Ss][PpMm] ]]; then
 			mkdir "$unpackedDir/$archiveNoExtension"
-		else
+		elif [[ ! $archiveExtension == [Ee][Ss][PpMm] ]]; then
 			rm -rf "$unpackedDir/$archiveNoExtension"
 			mkdir "$unpackedDir/$archiveNoExtension"
 		fi
@@ -268,6 +268,7 @@ DisableMod()
 			while read line
 			do
 				sed -i "/$line/d" "$pluginsTXT"
+				sed -i '/[[:space:]]$^$/d' "$pluginsTXT" && sed -i '/^$/d' "$pluginsTXT"
 			done <<< "$pluginsList"
 		fi
 		echo "> Mod disabled!"
@@ -325,7 +326,7 @@ UninstallMod()
 				fi
 				rm -rf "$unpackedDir/$mod" "$manifestDir/$mod.txt"
 			else
-				exit
+				break
 			fi
 		fi
 		mod=
@@ -574,23 +575,28 @@ MakeModManifest()
 			rm -f "$manifestDir/$mod.txt"
 		fi
 		manifest=$(tree --noreport -if $unpackedDir/"$mod")
-		removedLine=$(echo "$manifest" | grep -Ei .*".[cbe][dsas][xg2pm]|/meshes/|/textures/|/sound/|/scripts/|/interface/|/tools/|/video/" | head -n 1 | rev | cut -d "/" -f 2- | rev)$(printf "/")
-#		echo "$removedLine"
+		removedLine=$(echo "$manifest" | grep -Eio ".*\.esp|.*\.esm|.*\.ba2|.*\.cdx|.*/meshes/|.*/materials/|.*/textures/|.*/sound/|.*/scripts/|.*/interface/|.*/tools/|.*/video/" | head -n 1)
+		if [[ -f "$removedLine" ]]; then
+			removedLine=$(echo "$removedLine" | rev | cut -d "/" -f 2- | rev | head -n 1)$(printf "/")
+		else
+			removedLine=$(echo "$removedLine" | rev | cut -d "/" -f 3- | rev | head -n 1)$(printf "/")
+		fi
+#		echo "$removedLine" #debug
 		IFS=$'\n'
 		for _line in $manifest
 		do
 			_dest=
 			if [[ ! "$removedLine" == *"/"* ]]; then
 				if [[ -d "$_line" ]]; then
-					_dest="$(echo $_line | sed "s|$unpackedDir/$mod/||g" | sed 's/\(\/\|^\)\(.\)/\1\u\2/g')"
+					_dest="$(echo "$_line" | sed "s|$unpackedDir/$mod/||g" | sed 's/\(\/\|^\)\(.\)/\1\u\2/g')"
 				elif [[ -f "$_line" ]]; then
-					_dest="$(echo $_line | sed "s|$unpackedDir/$mod/||g" | sed 's|\([^/]*\)/|\u\1/|g')"
+					_dest="$(echo "$_line" | sed "s|$unpackedDir/$mod/||g" | sed 's|\([^/]*\)/|\u\1/|g')"
 				fi
 			else
 				if [[ -d "$_line" ]]; then
-					_dest="$(echo $_line | sed "s|$removedLine||g" | sed 's/\(\/\|^\)\(.\)/\1\u\2/g')"
+					_dest="$(echo "$_line" | sed "s|$removedLine||g" | sed 's/\(\/\|^\)\(.\)/\1\u\2/g')"
 				elif [[ -f "$_line" ]]; then
-					_dest="$(echo $_line | sed "s|$removedLine||g" | sed 's|\([^/]*\)/|\u\1/|g')"
+					_dest="$(echo "$_line" | sed "s|$removedLine||g" | sed 's|\([^/]*\)/|\u\1/|g')"
 				fi
 			fi
 			_newLine="\"$_line\" \"$_dest\""
@@ -711,6 +717,7 @@ MakeModManifest()
 							else
 								_dest=$(echo '$defaultDir')
 								_folderDests+=($_dest)
+#								echo "Adding file _dest=$_dest" #debug
 							fi
 						;;
 						*"<file source"*)
@@ -718,11 +725,11 @@ MakeModManifest()
 							_dest=$(echo "$line" | cut -d '"' -f 4 | sed 's|\([^/]*\)/|\u\1/|g')
 							if [[ $_dest =~ [Aa|Ee|Ii|Oo|Uu] ]]; then
 								_fileDests+=($_dest)
-#								echo "Adding file _dest=$_dest"
+#								echo "Adding file _dest=$_dest" #debug
 							else
 								_dest=$(echo '$defaultDir')
 								_fileDests+=($_dest)
-#								echo "Adding file _dest=$_dest"
+#								echo "Adding file _dest=$_dest" #debug
 							fi
 						;;
 						*"</plugin>"*)
@@ -760,7 +767,11 @@ MakeModManifest()
 							_descriptionCurrent=""
 						;;
 						*"<description"*)
-							_descriptionSwitch=true
+							if [[ "$line" == *"</description>"* ]] || [[ "$line" == *"/>"* ]]; then
+								_descriptionCurrent+=$(echo "$line" | sed "s|<description>||g" | sed "s|</description>||g" | sed "s|<.*||g"| sed 's/&#xD;//g' | sed "s|  ||g" | sed "s|\t||g")
+							else
+								_descriptionSwitch=true
+							fi
 						;;
 						*"</description")
 							_descriptionSwitch=false
@@ -775,7 +786,8 @@ MakeModManifest()
 					case "$line" in
 						*"<plugin name"*)
 							_name=$(echo "$line" | cut -d '"' -f 2)
-							_pluginNames+=($_name)
+#							echo "<plugin name=$_name" #debug
+							_pluginNames+=("'$_name'")
 							_pluginNameCurrent="$_name"
 						;;
 						*"<flag"*)
@@ -794,18 +806,21 @@ MakeModManifest()
 						*"<file source"*)
 							_fileSources+=("$_pluginNameCurrent:"$(echo "$line" | cut -d '"' -f 2))
 							_dest="$_pluginNameCurrent:"$(echo "$line" | cut -d '"' -f 4)
+#							echo "$_dest" #debug
 							if [[ $_dest =~ [Aa|Ee|Ii|Oo|Uu] ]]; then
 								_fileDests+=($_dest)
+#								echo "${_fileDests[@]}" #debug
 							else
 								_dest="$_pluginNameCurrent:"'$defaultDir'
 								_fileDests+=($_dest)
+#								echo "${_fileDests[@]}" #debug
 							fi
 						;;
 						*"</plugins>"*)
 							_pluginNamesList=""
 							for item in "${_pluginNames[@]}"
 							do
-								if [[ "$_pluginNamesList" =~ [Aa|Ee|Ii|Oo|Uu|Yy] ]]; then
+								if [[ "$_pluginNamesList" =~ [Aa|Ee|Ii|Oo|Uu|Yy|1-9] ]]; then
 									_pluginNamesList=$(printf "$_pluginNamesList\n$item")
 								else
 									_pluginNamesList=$(printf "$item")
@@ -813,14 +828,15 @@ MakeModManifest()
 							done
 							
 							if [[ ${groupTypes[$iteration]} == "SelectAtMostOne" ]]; then
-								if [[ "$_pluginNamesList" =~ [Aa|Ee|Ii|Oo|Uu|Yy] ]]; then
+								if [[ "$_pluginNamesList" =~ [Aa|Ee|Ii|Oo|Uu|Yy|1-9] ]]; then
 									_pluginNamesList=$(printf "$_pluginNamesList\nNone")
 								else
 									_pluginNamesList=$(printf "$item")
 								fi
 							fi
 							echo "$_descriptionCurrent"
-							PresentList "$_pluginNamesList" "Please enter the number for the plugin you want to install." ""
+#							echo "$_pluginNamesList" #debug
+							PresentList "$_pluginNamesList" "Please enter the number for the plugin you want to install."
 							_itemSelected=$presentListResult
 							
 							if [[ "$_itemSelected" == "None" ]]; then
@@ -847,31 +863,40 @@ MakeModManifest()
 									if [[ "$folder" =~ "$_itemSelected" ]]; then
 										folder=$(echo "$folder" | sed "s|$_itemSelected:||g" | sed 's/\(\/\|^\)\(.\)/\1\u\2/g')
 										optionalFolderDests+=($folder)
-#										echo "adding folder $folder"
+#										echo "adding folder $folder" #debug
 									fi
 								done
 								
 								for file in "${_fileSources[@]}"
 								do
-									if [[ "$file" =~ "$_itemSelected" ]]; then
-										file=$(echo "$file" | sed "s|$_itemSelected:||g")
+									_itemSelected2=$(echo "$_itemSelected" | sed "s|'||g")
+									if [[ "$file" == *$_itemSelected2* ]]; then
+										file=$(echo "$file" | cut -d ":" -f 2)
 										optionalFileSources+=($file)
+#										echo "adding source file: $file" #debug
 									fi
 								done
 								
 								for file in "${_fileDests[@]}"
 								do
-									if [[ "$file" =~ "$_itemSelected" ]]; then
-										file=$(echo "$file" | sed "s|$_itemSelected:||g" | sed 's|\([^/]*\)/|\u\1/|g')
+									_itemSelected2=$(echo "$_itemSelected" | sed "s|'||g")
+#									echo "file = $file" #debug
+#									echo "_itemSelected2 = $_itemSelected2" #debug
+									if [[ "$file" == *$_itemSelected2* ]]; then
+										file=$(echo "$file" | cut -d ":" -f 2 | sed 's|\([^/]*\)/|\u\1/|g')
 										optionalFileDests+=($file)
-#										echo "adding file $file"
+#										echo "adding destination file: $file" #debug
 									fi
 								done
 							fi
 							_descriptionCurrent=""
 						;;
 						*"<description"*)
-							_descriptionSwitch=true
+							if [[ "$line" == *"</description>"* ]] || [[ "$line" == *"/>"* ]]; then
+								_descriptionCurrent+=$(echo "$line" | sed "s|<description>||g" | sed "s|</description>||g" | sed "s|<.*||g"| sed 's/&#xD;//g' | sed "s|  ||g" | sed "s|\t||g")
+							else
+								_descriptionSwitch=true
+							fi
 						;;
 						*"</description")
 							_descriptionSwitch=false
@@ -992,44 +1017,44 @@ MakeModManifest()
 					optionalFileDests+=($_file)
 				done
 			fi
-
-			_triggers=()
-			_iteration=$(bc <<< "$_iteration+1")
 		done
-#		echo "requiredInstallFileSources="
-#		echo ${requiredInstallFileSources[@]}
-#		echo "requiredInstallFileDests="
-#		echo ${requiredInstallFileDests[@]}
-#		echo "requiredInstallFolderSources="
-#		echo ${requiredInstallFolderSources[@]}
-#		echo "requiredInstallFolderDests="
-#		echo ${requiredInstallFolderDests[@]}
+		_triggers=()
+		_iteration=$(bc <<< "$_iteration+1")
 
-#		echo "optionalFileSources="
-#		echo ${optionalFileSources[@]}
-#		echo "optionalFileDests="
-#		echo ${optionalFileDests[@]}
-#		echo "optionalFolderSources="
-#		echo ${optionalFolderSources[@]}
-#		echo "optionalFolderDests="
-#		echo ${optionalFolderDests[@]}
+#		echo "requiredInstallFileSources=" #debug
+#		echo ${requiredInstallFileSources[@]} #debug
+#		echo "requiredInstallFileDests=" #debug
+#		echo ${requiredInstallFileDests[@]} #debug
+#		echo "requiredInstallFolderSources=" #debug
+#		echo ${requiredInstallFolderSources[@]} #debug
+#		echo "requiredInstallFolderDests=" #debug
+#		echo ${requiredInstallFolderDests[@]} #debug
+
+#		echo "optionalFileSources=" #debug
+#		echo ${optionalFileSources[@]} #debug
+#		echo "optionalFileDests=" #debug
+#		echo ${optionalFileDests[@]} #debug
+#		echo "optionalFolderSources=" #debug
+#		echo ${optionalFolderSources[@]} #debug
+#		echo "optionalFolderDests=" #debug
+#		echo ${optionalFolderDests[@]} #debug
 	
-#		echo "flagsEnabled="
-#		echo ${flagsEnabled[@]}
+#		echo "flagsEnabled=" #debug
+#		echo ${flagsEnabled[@]} #debug
 		
-#		echo "groupBegin="
-#		echo ${groupBegin[@]}
-#		echo "groupEnd="
-#		echo ${groupEnd[@]}
-#		echo "groupNames="
-#		echo ${groupNames[@]}
-#		echo "groupTypes="
-#		echo ${groupTypes[@]}
-#		echo "patternBegin="
-#		echo ${patternBegin[@]}
-#		echo "patternEnd="
-#		echo ${patternEnd[@]}
-		
+#		echo "groupBegin=" #debug
+#		echo ${groupBegin[@]} #debug
+#		echo "groupEnd=" #debug
+#		echo ${groupEnd[@]} #debug
+#		echo "groupNames=" #debug
+#		echo ${groupNames[@]} #debug
+#		echo "groupTypes=" #debug
+#		echo ${groupTypes[@]} #debug
+#		echo "patternBegin=" #debug
+#		echo ${patternBegin[@]} #debug
+#		echo "patternEnd=" #debug
+#		echo ${patternEnd[@]} #debug
+
 		if [ -f "$manifestDir/$mod.txt" ];then
 			rm -f "$manifestDir/$mod.txt"
 		fi
@@ -1050,7 +1075,7 @@ MakeModManifest()
 			for _line in $_manifest
 			do
 				if [[ ! "$_line" == "\"$unpackedDir/$mod/$_item\"" ]]; then
-					_dest="$(echo $_line | sed "s|$unpackedDir/$mod/$_item/|/${optionalFolderDests[$_iteration]}/|g" | sed 's/$defaultDir//g'| sed 's/\(\/\|^\)\(.\)/\1\u\2/g' | cut -d "/" -f 2-)"
+					_dest="$(echo $_line | sed "s|$unpackedDir/$mod/$_item/|/${requiredInstallFolderDests[$_iteration]}/|g" | sed 's/$defaultDir//g'| sed 's/\(\/\|^\)\(.\)/\1\u\2/g' | cut -d "/" -f 2-)"
 					_firstDestChar=$(echo "$_dest" | cut -c 1)
 					if [[ $_firstDestChar == "/" ]]; then
 						_dest=$(echo "$_dest" | cut -c 2- | sed 's/\(^.\)/\u\1/g')
@@ -1067,6 +1092,7 @@ MakeModManifest()
 		do
 			echo "\"$unpackedDir/$mod/$_item\" \"${optionalFileDests[$_iteration]}\"" >> "$manifestDir/$mod.txt"
 			_iteration=$(bc <<< "$_iteration+1")
+			echo "OptionalFileSources/Dests=\"$unpackedDir/$mod/$_item\" \"${optionalFileDests[$_iteration]}\"" #Debug
 		done
 		_iteration=0
 		for _item in "${optionalFolderSources[@]}"
@@ -1075,16 +1101,17 @@ MakeModManifest()
 			IFS=$'\n'
 			for _line in $_manifest
 			do
-				if [[ ! "$_line" == "\"$unpackedDir/$mod/$_item\"" ]]; then
-					_dest="$(echo $_line | sed "s|$unpackedDir/$mod/$_item/|/${optionalFolderDests[$_iteration]}/|g" | sed 's/$defaultDir//g'| sed 's/\(\/\|^\)\(.\)/\1\u\2/g' | cut -d "/" -f 2-)"
+				if [[ ! "$_line" == *"$_item\"" ]] && [[ ! "$_line" == *"$_item/\"" ]]; then # If item doesn't equal base folder then
+					_dest="$(echo "$_line" | sed "s|.*$_item|${optionalFolderDests[$_iteration]}/|g" | sed 's/$defaultDir//g'| sed 's/\(\/\|^\)\(.\)/\1\u\2/g' | sed "s|//|/|g")" # | cut -d "/" -f 2-)"
 					_firstDestChar=$(echo "$_dest" | cut -c 1)
 					if [[ $_firstDestChar == "/" ]]; then
 						_dest=$(echo "$_dest" | cut -c 2- | sed 's/\(^.\)/\u\1/g')
 					fi
 					_newLine="$_line \"$_dest"
-#					echo "> $_newLine"
-#					echo "> optionalFolderDests[\$_iteration] = ${optionalFolderDests[$_iteration]}"
-					echo "$_newLine" >> "$manifestDir/$mod.txt"
+					echo "> \$_newLine=$_newLine" #Debug
+					echo "> \$unpackedDir/\$mod/\$_item/=$unpackedDir/$mod/$_item/" #Debug
+					echo "> optionalFolderDests[\$_iteration] = ${optionalFolderDests[$_iteration]}" #Debug
+					echo "$_newLine" >> "$manifestDir/$mod.txt" #Debug
 				fi
 			done
 			_iteration=$(bc <<< "$_iteration+1")
@@ -1285,5 +1312,4 @@ do
 			exit
 		;;
 	esac
-	sleep 2
 done
